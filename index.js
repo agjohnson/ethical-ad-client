@@ -38,12 +38,6 @@ const AD_TYPES_VERSION = 1;  // Used with the ad type slugs
 const ATTR_PREFIX = "data-ea-";
 const ABP_DETECTION_PX = "https://media.ethicalads.io/abp/px.gif";
 
-// Features
-//
-// Supports multiple ad placements? We don't support this yet, but the code is
-// here for future support.
-const SUPPORTS_MULTIPLE_PLACEMENTS = false;
-
 // Keywords and topics
 //
 // This allows us to categorize pages simply and have better content targeting.
@@ -379,7 +373,7 @@ export class Placement {
    * string from API response. Can also be null, indicating a noop action.
    */
   fetch() {
-    const callback = "ad_" + Date.now();
+    const callback = "ad_" + Date.now() + "_" + Math.floor(Math.random() * 1000000);
     var div_id = callback;
     if (this.target.id) {
       div_id = this.target.id;
@@ -489,6 +483,10 @@ export class Placement {
    * @returns {Array[string]} Advertising keywords found on the page
    */
   detectKeywords() {
+    // Return previously detected keywords
+    // If this code has already run.
+    if (detectedKeywords.length > 0) return detectedKeywords;
+
     var keywordHist = {};  // Keywords found => count of keyword
     const mainContent = document.querySelector("[role='main']") ||
       document.querySelector("main") ||
@@ -504,10 +502,6 @@ export class Placement {
       }
     }
 
-    // This logs all keywords found,
-    // even if they weren't found MIN_KEYWORD_OCCURRENCES
-    console.debug("EthicalAds detected keywords:", keywordHist);
-
     // Sort the hist with the most common items first
     // Grab only the MAX_KEYWORDS most common
     const keywords = Object.entries(keywordHist).filter(
@@ -520,6 +514,8 @@ export class Placement {
         return 0;
       }
     ).slice(0, MAX_KEYWORDS).map((x) => x[0]);
+
+    detectedKeywords = keywords;
 
     return keywords;
   }
@@ -552,29 +548,26 @@ export function check_dependencies() {
  * @returns {Promise<[Placement]>} Resolves to a list of Placement instances
  */
 export function load_placements(force_load = false) {
-  // Find all elements matching required data binding attribute. We don't yet
-  // support multiple placements on the ad-server. For now, this could result in
-  // competing ad placements.
+  // Find all elements matching required data binding attribute.
   const node_list = document.querySelectorAll("[" + ATTR_PREFIX + "publisher]");
   let elements = Array.prototype.slice.call(node_list);
 
-  // Create main promise. Iterator `all()` Promise wil surround array of found
+  // Create main promise. Iterator `all()` Promise will surround array of found
   // elements. If any of these elements have issues, this main promise will
   // reject.
   if (elements.length === 0) {
     throw new Error("No ad placements found.");
-  } else if (!SUPPORTS_MULTIPLE_PLACEMENTS && elements.length > 1) {
-    console.error(
-      "Multiple ad placements are not supported, only using the first ad placement."
-    );
-    elements = elements.slice(0, 1);
   }
 
   return Promise.all(
-    elements.map((element) => {
+    elements.map((element, index) => {
       const placement = Placement.from_element(element);
 
-      if (placement && !force_load) {
+      // Run AcceptableAds detection code
+      // This lets us know how many impressions are attributed to AceeptableAds
+      // Only run this once even for multiple placements
+      // All impressions will be correctly attributed
+      if (index === 0 && placement && !force_load) {
         placement.detectABP(ABP_DETECTION_PX, function (usesABP) {
           uplifted = usesABP;
           if (usesABP) {
@@ -634,6 +627,11 @@ export var load;
  * @type boolean
  */
 export var uplifted = false;
+
+/* Keywords detected on the page
+ * @type {Array[string]}
+ */
+export var detectedKeywords = [];
 
 /* If importing this as a module, do not automatically process DOM and fetch the
  * ad placement. Only do this if using the module directly, from a `script`
